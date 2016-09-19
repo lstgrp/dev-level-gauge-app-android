@@ -25,3 +25,7 @@ This is about "Level Gauge"'s sample source.
         }
         ...
     }
+
+# Install package
+ Download : https://github.com/lstgrp/level-gauge/blob/master/Application/build/outputs/apk/level_gauge_sample.apk
+ 
