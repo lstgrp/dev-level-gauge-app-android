@@ -9,8 +9,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Message;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -18,10 +22,20 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import com.lstgrp.android.levelgaugesample.internet.HttpParser;
+import com.lstgrp.android.levelgaugesample.internet.repo.CloseLevelGaugeDataRepo;
+import com.lstgrp.android.levelgaugesample.internet.repo.DeviceIDRepo;
+import com.lstgrp.android.levelgaugesample.internet.repo.GetLevelGaugeDataRepo;
+import com.lstgrp.android.levelgaugesample.internet.repo.SaveLevelGaugeDataRepo;
+import com.lstgrp.android.levelgaugesample.preference.DevicePreference;
+
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -50,6 +64,8 @@ public class DeviceControlActivity extends Activity {
     private BluetoothGattCharacteristic mReadSerialNumberCharacteristic;
     private BluetoothGattCharacteristic mReadFirmwareRevisionCharacteristic;
     private BluetoothGattCharacteristic mReadHardwareRevisionCharacteristic;
+
+    private int lastTime, lastEvent, lastLevel;
 
     // Code to manage Service lifecycle.
     private final ServiceConnection mServiceConnection = new ServiceConnection() {
@@ -188,9 +204,27 @@ public class DeviceControlActivity extends Activity {
             second = times[5];
             int levelNum = value[7];
 
+            lastTime = getCurrentTimeMillis(times);
+            lastEvent = c - 48;
+            lastLevel = levelNum;
+
             return year + "/" + month + "/" + day + " " + hour + ":" + minute + ":" + second
                     + "\ntype : " + type + ", level : " + levelNum;
         } else return "";
+    }
+
+    private int getCurrentTimeMillis(int[] times) {
+        String someDate = times[0] + "/" + times[1] + "/" + times[2] + " " + times[3] + ":" + times[4] + ":" + times[5];
+
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd hh:mm:ss");
+        Date date = null;
+        try {
+            date = sdf.parse(someDate);
+        } catch (ParseException e) {
+            e.printStackTrace();
+        }
+
+        return (int) (date.getTime() / 1000);
     }
 
     public int[] getTime(byte[] value) {
@@ -214,31 +248,54 @@ public class DeviceControlActivity extends Activity {
     private View.OnClickListener mButtonListener = new View.OnClickListener() {
         @Override
         public void onClick(View v) {
+            String deviceID = DevicePreference.getDeviceID(getApplicationContext());
+            String token = DevicePreference.getToken(getApplicationContext());
+
+            switch (v.getId()) {
+                case R.id.get_device_id_button:
+                case R.id.save_level_gauge_data_button:
+                case R.id.get_level_gauge_data_button:
+                case R.id.close_button:
+                    if (!isNetWork()) {
+                        Toast.makeText(getApplicationContext(), "check network connection state", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    break;
+            }
+
             switch (v.getId()) {
                 case R.id.notify_value_button:
                     setmNotifyCustomValueCharacteristic(tempCustomValueCharacteristic);
                     break;
+
                 case R.id.notify_battery_button:
                     setmNotifyBatteryCharacteristic(tempBatteryCharacteristic);
                     break;
+
                 case R.id.read_time_button:
                     mBluetoothLeService.readCharacteristic(mReadTimeCharacteristic);
                     break;
+
                 case R.id.read_manufacturer_name_button:
                     mBluetoothLeService.readCharacteristic(mReadManufacturerNameCharacteristic);
                     break;
+
                 case R.id.read_model_number_button:
                     mBluetoothLeService.readCharacteristic(mReadModelNumberCharacteristic);
                     break;
+
                 case R.id.read_serial_number_button:
                     mBluetoothLeService.readCharacteristic(mReadSerialNumberCharacteristic);
                     break;
+
                 case R.id.read_firmware_revision_button:
                     mBluetoothLeService.readCharacteristic(mReadFirmwareRevisionCharacteristic);
                     break;
+
                 case R.id.read_hardware_revision_button:
                     mBluetoothLeService.readCharacteristic(mReadHardwareRevisionCharacteristic);
                     break;
+
                 case R.id.send_time_button:
                     EditText tv = (EditText) findViewById(R.id.time_textView);
                     byte[] timeByteArray;
@@ -251,7 +308,100 @@ public class DeviceControlActivity extends Activity {
 
                     mBluetoothLeService.writeCharacteristic(mReadTimeCharacteristic, timeByteArray);
                     break;
+
+                case R.id.get_device_id_button:
+                    String name = ((EditText) findViewById(R.id.name_edittext)).getText().toString().trim();
+                    String serial = ((TextView) findViewById(R.id.serialNumberTextView)).getText().toString().trim();
+                    HttpParser.connectDevice(httpParserHandler, name, serial);
+                    break;
+
+                case R.id.save_level_gauge_data_button:
+                    int time = lastTime;
+                    int event = lastEvent;
+                    int level = lastLevel;
+                    HttpParser.saveLevelGaugeData(httpParserHandler, token, deviceID, time, event, level);
+                    break;
+
+                case R.id.get_level_gauge_data_button:
+                    HttpParser.getLevelGaugeData(httpParserHandler, token, deviceID);
+                    break;
+
+                case R.id.close_button:
+                    HttpParser.closeDeviceID(httpParserHandler, token);
+                    break;
+
             }
+        }
+    };
+
+    private Boolean isNetWork() {
+
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+        if (activeNetwork != null) {
+            if (activeNetwork.getType() == ConnectivityManager.TYPE_WIFI && activeNetwork.isConnectedOrConnecting()) {// wifi 연결중
+                return true;
+            } else if (activeNetwork.getType() == ConnectivityManager.TYPE_MOBILE && activeNetwork.isConnectedOrConnecting()) {// 모바일 네트워크 연결중
+                return true;
+            } else {
+                return false;// 네트워크 오프라인 상태.
+            }
+        } else {// 네트워크 null
+            return false;
+        }
+    }
+
+    Handler httpParserHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case HttpParser.HANDLER_TOAST_MESSAGE:
+                    Toast.makeText(getApplicationContext(), msg.obj.toString(), Toast.LENGTH_SHORT).show();
+                    break;
+
+                case HttpParser.HANDLER_GET_DEVICE_ID:
+                    DeviceIDRepo dRepo = (DeviceIDRepo) msg.obj;
+                    DevicePreference.setDeviceID(getApplicationContext(), dRepo.getDeviceID());
+                    DevicePreference.setToken(getApplicationContext(), dRepo.getToken());
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.device_id_textview)).setText(dRepo.getDeviceID());
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.device_token_textview)).setText(dRepo.getToken());
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.device_ttl_textview)).setText(String.valueOf(String.valueOf(dRepo.getTTL())));
+                    break;
+
+                case HttpParser.HANDLER_SAVE_DEVICE_DATA:
+                    SaveLevelGaugeDataRepo sRepo = (SaveLevelGaugeDataRepo) msg.obj;
+                    String result = sRepo.getResult();
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.result_textview)).setText("save : " + result);
+                    break;
+
+                case HttpParser.HANDLER_GET_DEVICE_DATA:
+                    GetLevelGaugeDataRepo gRepo = (GetLevelGaugeDataRepo) msg.obj;
+                    int cnt = gRepo.getCount();
+                    StringBuilder sb = new StringBuilder();
+                    String text = "device id:%s\ntime:%s\nevent:%s\nlevel:%s\n\n";
+                    for (int i = 0; i < cnt; i++) {
+                        String deviceid = gRepo.get(i).getDeviceID();
+                        String time = new Date(gRepo.get(i).getTime() * 1000L).toString();
+                        int event = gRepo.get(i).getEvent();
+                        int level = gRepo.get(i).getLevel();
+                        sb.append(String.format(text, deviceid, time,event,level));
+                    }
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.result_textview)).setText(sb.toString());
+                    break;
+
+                case HttpParser.HANDLER_CLOSE_SESSION:
+                    CloseLevelGaugeDataRepo cRepo = (CloseLevelGaugeDataRepo) msg.obj;
+                    result = cRepo.getResult();
+                    DevicePreference.removeDeviceID(getApplicationContext());
+                    DevicePreference.removeToken(getApplicationContext());
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.device_id_textview)).setText("");
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.device_token_textview)).setText("");
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.device_ttl_textview)).setText("");
+                    ((TextView) DeviceControlActivity.this.findViewById(R.id.result_textview)).setText(String.format("session close : %s", result));
+                    break;
+
+            }
+            super.handleMessage(msg);
         }
     };
 
@@ -419,6 +569,14 @@ public class DeviceControlActivity extends Activity {
         Button mSendTimeButton = (Button) findViewById(R.id.send_time_button);
         mSendTimeButton.setOnClickListener(mButtonListener);
 
+        Button mGetDeviceIDButton = (Button) findViewById(R.id.get_device_id_button);
+        mGetDeviceIDButton.setOnClickListener(mButtonListener);
+        Button mSaveLevelGaugeButton = (Button) findViewById(R.id.save_level_gauge_data_button);
+        mSaveLevelGaugeButton.setOnClickListener(mButtonListener);
+        Button mGetLevelGaugeDataButton = (Button) findViewById(R.id.get_level_gauge_data_button);
+        mGetLevelGaugeDataButton.setOnClickListener(mButtonListener);
+        Button mCloseSessionButton = (Button) findViewById(R.id.close_button);
+        mCloseSessionButton.setOnClickListener(mButtonListener);
 
         getActionBar().setTitle(mDeviceName);
         getActionBar().setDisplayHomeAsUpEnabled(true);
