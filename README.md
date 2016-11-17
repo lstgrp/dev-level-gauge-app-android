@@ -1,8 +1,9 @@
 # sample android app for BLE level-gauge
 
 ## Master : 
--BLE Connect
--Packet parse
+- BLE Connect
+- Packet parse
+
 ## Branch : _with_server
 - RESTfutl
 
