@@ -1,5 +1,11 @@
 # sample android app for BLE level-gauge
 
+## Master : 
+-BLE Connect
+-Packet parse
+## Branch : _with_server
+- RESTfutl
+
 # Document : https://goo.gl/FjH8SB
 
 This is about "Level Gauge"'s sample source.
