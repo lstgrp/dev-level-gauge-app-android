@@ -5,7 +5,7 @@
 - Packet parse
 
 ## Branch : _with_server
-- RESTfutl
+- RESTful
 
 # Document : https://goo.gl/FjH8SB
 
